@@ -1,0 +1,72 @@
+<#
+.SYNOPSIS
+    Retrieves the iOS app bundle ID using app name or App Store ID.
+
+.DESCRIPTION
+    Looks up an iOS app on the Apple iTunes Store using either the app's name or its numeric App Store ID.
+    If multiple results are found, presents a list for user selection.
+
+.PARAMETER AppName
+    The name (or partial name) of the iOS app to search for.
+
+.PARAMETER AppId
+    The numeric App Store ID of the iOS app.
+
+.EXAMPLE
+    Get-IosAppBundleId -AppName "Remote Desktop Manager"
+
+.EXAMPLE
+    Get-IosAppBundleId -AppId 1039961293
+
+.NOTES
+    Requires internet access. Uses the iTunes Search API.
+#>
+function Get-IosAppBundleId {
+    [CmdletBinding(DefaultParameterSetName = "ByName")]
+    param(
+        [Parameter(ParameterSetName = "ByName", Mandatory = $true, Position = 0, HelpMessage = "Name (or partial name) of the iOS app.")]
+        [string]$AppName,
+
+        [Parameter(ParameterSetName = "ById", Mandatory = $true, Position = 0, HelpMessage = "Numeric App Store ID of the iOS app.")]
+        [string]$AppId
+    )
+
+    # Build the lookup URL
+    if ($PSCmdlet.ParameterSetName -eq "ById") {
+        $url = "https://itunes.apple.com/lookup?id=$AppId"
+    } else {
+        $encodedName = [System.Web.HttpUtility]::UrlEncode($AppName)
+        $url = "https://itunes.apple.com/search?term=$encodedName&entity=software&limit=10"
+    }
+
+    try {
+        $response = Invoke-RestMethod -Uri $url -UseBasicParsing
+
+        if ($response.resultCount -eq 0) {
+            Write-Warning "No app found matching your query."
+            return
+        }
+
+        # Handle single or multiple results
+        $apps = $response.results
+        if ($apps.Count -eq 1) {
+            $bundleId = $apps[0].bundleId
+            Write-Output $bundleId
+            return
+        } elseif ($apps.Count -gt 1) {
+            Write-Host "Multiple apps found. Please select the correct app:" -ForegroundColor Yellow
+            $table = $apps | Select-Object @{Name="Index";Expression={[array]::IndexOf($apps, $_) + 1}}, trackName, sellerName, bundleId, trackViewUrl
+            $table | Format-Table -AutoSize
+
+            do {
+                $selection = Read-Host "Enter the number of the app you want (1-$($apps.Count))"
+            } while (-not ($selection -as [int]) -or $selection -lt 1 -or $selection -gt $apps.Count)
+
+            $selectedApp = $apps[$selection - 1]
+            Write-Output $selectedApp.bundleId
+            return
+        }
+    } catch {
+        Write-Error "Failed to retrieve app information: $_"
+    }
+}
